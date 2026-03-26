@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-
+#include <linux/ip.h>
 #include <linux/bpf.h>
+#include <linux/if_ether.h>
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_endian.h>
 #include <xdp/xdp_helpers.h>
 
 #include "xsk_def_xdp_prog.h"
@@ -34,10 +36,31 @@ int xsk_def_prog(struct xdp_md *ctx)
 	if (!refcnt)
 		return XDP_PASS;
 
+	void *data = (void *)(long)ctx->data;
+    void *data_end = (void *)(long)ctx->data_end;
+    struct ethhdr *eth = data;
+    struct iphdr *iph;
+
+    if ((void *)(eth + 1) > data_end)
+        return XDP_PASS;
+
+    if (eth->h_proto != bpf_htons(ETH_P_IP))
+        return XDP_PASS;
+
+    iph = (struct iphdr *)(eth + 1);
+    if ((void *)(iph + 1) > data_end)
+        return XDP_PASS;
+
+    if (iph->saddr == bpf_htonl(0x0A0A02CC)){
+        bpf_printk("Redirecting packet to xsk\n");
+        return bpf_redirect_map(&xsks_map, ctx->rx_queue_index, XDP_PASS);
+    }
+
 	/* A set entry here means that the corresponding queue_id
 	 * has an active AF_XDP socket bound to it.
 	 */
-	return bpf_redirect_map(&xsks_map, ctx->rx_queue_index, XDP_PASS);
+	// return bpf_redirect_map(&xsks_map, ctx->rx_queue_index, XDP_PASS);
+    return XDP_PASS;
 }
 
 char _license[] SEC("license") = "GPL";
